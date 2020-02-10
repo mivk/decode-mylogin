@@ -1,0 +1,47 @@
+#!/usr/bin/perl
+
+## Decode/decrypt MySQL's .mylogin.cnf file
+
+## Needs Crypt::ECB (https://metacpan.org/pod/Crypt::ECB)
+##   sudo apt install libcrypt-ecb-perl
+## or
+##   cpan Crypt::ECB
+
+# adapted to perl from
+# http://mysqldump.azundris.com/archives/104-.mylogin.cnf-password-recovery.html
+# The format of the file is as follows (as of MySQL 5.6.7-RC):
+#    4 Bytes Zero (Version Information)
+#    20 Bytes Key Generation Matter
+#    Repeated:
+#        4 Bytes Length information
+#        Length bytes crypted matter. The crypt is done using the AES ENCRYPT function,
+#          which in itself is insecure: It is an aes-128-ecb with a NULL IV.
+
+
+use strict;
+use Crypt::ECB qw(decrypt);
+
+my $VERSION=0.2;
+
+my $file = $ARGV || $ENV{HOME} . '/.mylogin.cnf';
+unless ($file) {
+	die "Usage: $0 [FILE]\n", "  (with no argument, tries to open '~/.mylogin.cnf')\n";
+}
+
+
+open F, $file       or die "Can't open $file: $!\n";
+
+# skip 4 null bytes at start
+read F, my $raw, 4  or die "Can't read $file: $!\n";
+
+# extract key
+read F, $raw, 20 or die "Error reading from $file: $!\n";
+my $key = substr($raw, 0, 16) ^ substr($raw, 16, 4);
+
+# decrypt lines
+while (read F, my $len, 4) {
+	read F, my $line, unpack('V', $len);
+	my $plain = decrypt($key, 'Rijndael', $line);
+	$plain =~ s/\n.*//; # remove padding at the end
+	print "$plain\n";
+}
